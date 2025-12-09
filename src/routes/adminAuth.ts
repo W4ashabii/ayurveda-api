@@ -89,9 +89,13 @@ router.get(
       // Determine redirect URL based on user role
       // Remove any trailing slashes from clientUrl to avoid double slashes
       const cleanClientUrl = clientUrl.replace(/\/+$/, '');
+      
+      // Add token to URL as fallback if cookies don't work (temporary, will be replaced by cookie)
+      // This helps with cross-origin cookie issues
+      const tokenParam = `?token=${encodeURIComponent(token)}`;
       const redirectUrl = isAdmin 
-        ? `${cleanClientUrl}/admin/dashboard`
-        : `${cleanClientUrl}/`;
+        ? `${cleanClientUrl}/admin/dashboard${tokenParam}`
+        : `${cleanClientUrl}/${tokenParam}`;
       
       // Set cookie and redirect
       // For cross-origin cookies in production, use sameSite: 'none' and secure: true
@@ -102,17 +106,28 @@ router.get(
       const backendUrl = new URL(process.env.OAUTH_CALLBACK_URL || `http://localhost:3000/api/auth/google/callback`);
       const backendDomain = backendUrl.hostname;
       
+      // For cross-origin cookies, we MUST use sameSite: 'none' and secure: true
+      // Even if NODE_ENV is not production, if we're on HTTPS (Vercel), use secure cookies
+      const isHTTPS = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https';
       const cookieOptions: any = {
         httpOnly: true,
-        // Less strict: allow secure cookies in production, but also allow non-secure in dev
-        secure: isProduction && process.env.FORCE_SECURE_COOKIES !== 'false',
-        // Less strict: use 'lax' in dev, 'none' in production (but try 'lax' first even in prod)
-        sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax' | 'strict',
+        // Force secure for HTTPS (required for sameSite: 'none')
+        secure: isHTTPS || isProduction,
+        // Force 'none' for cross-origin (required for cross-domain cookies)
+        sameSite: 'none' as 'none',
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
         path: '/', // Ensure cookie is available across all routes
-        // For cross-origin cookies, don't set domain explicitly - browser handles it
-        // Setting domain explicitly can cause issues with cross-origin cookies
+        // DO NOT set domain - let browser handle it for cross-origin
       };
+      
+      console.log('[OAuth] Cookie options:', {
+        secure: cookieOptions.secure,
+        sameSite: cookieOptions.sameSite,
+        isHTTPS,
+        isProduction,
+        protocol: req.protocol,
+        forwardedProto: req.get('x-forwarded-proto'),
+      });
       
       // Set additional CORS headers to ensure cookie is accepted
       res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -273,14 +288,70 @@ router.get('/me', (req: Request, res: Response) => {
   }
 });
 
+// Set token cookie (fallback for cross-origin cookie issues)
+router.post('/set-token', (req: Request, res: Response) => {
+  setCORSHeaders(req, res);
+  
+  try {
+    const { token } = req.body;
+    
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: 'Token is required',
+      });
+    }
+    
+    // Verify token is valid before setting cookie
+    const user = verifyJwt(token);
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid token',
+      });
+    }
+    
+    // Set cookie with same options as OAuth callback
+    const isHTTPS = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https';
+    const isProduction = process.env.NODE_ENV === 'production';
+    
+    const cookieOptions: any = {
+      httpOnly: true,
+      secure: isHTTPS || isProduction,
+      sameSite: 'none' as 'none',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+    };
+    
+    res.cookie('auth_token', token, cookieOptions);
+    
+    console.log('[Auth] Token cookie set via /set-token endpoint for user:', user.email);
+    
+    res.json({
+      success: true,
+      message: 'Token cookie set successfully',
+    });
+  } catch (error: any) {
+    console.error('[Auth] Error setting token cookie:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to set token cookie',
+    });
+  }
+});
+
 // Logout
 router.post('/logout', (req: Request, res: Response) => {
+  setCORSHeaders(req, res);
+  
   const isProduction = process.env.NODE_ENV === 'production';
+  const isHTTPS = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https';
+  
   // Clear cookie with same options used when setting it
   res.clearCookie('auth_token', {
     httpOnly: true,
-    secure: isProduction,
-    sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax',
+    secure: isHTTPS || isProduction,
+    sameSite: 'none' as 'none',
     path: '/',
   });
   

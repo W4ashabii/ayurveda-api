@@ -109,7 +109,7 @@ app.use(express.json({ limit: '10mb', strict: false }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
-// Session - less strict cookie settings
+// Session - cookie settings for cross-origin
 const isProduction = process.env.NODE_ENV === 'production';
 app.use(
   session({
@@ -117,11 +117,11 @@ app.use(
     resave: false,
     saveUninitialized: false,
     cookie: {
-      // Less strict: only require secure if explicitly set
-      secure: isProduction && process.env.FORCE_SECURE_COOKIES !== 'false',
+      // Force secure for HTTPS (required for sameSite: 'none')
+      secure: true, // Always true for Vercel (HTTPS)
       httpOnly: true,
-      // Less strict: use 'lax' by default, 'none' only if needed
-      sameSite: (isProduction && process.env.USE_STRICT_SAMESITE !== 'false') ? 'none' : 'lax',
+      // Force 'none' for cross-origin cookies
+      sameSite: 'none',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     },
   })

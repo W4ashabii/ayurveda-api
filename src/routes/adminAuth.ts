@@ -136,14 +136,39 @@ router.get(
       // Set cookie BEFORE redirect
       res.cookie('auth_token', token, cookieOptions);
       
-      // Verify cookie was set
+      // Verify cookie was set - check multiple ways
       const setCookieHeader = res.getHeader('Set-Cookie');
       const cookieHeaderValue = Array.isArray(setCookieHeader) 
         ? setCookieHeader[0] 
         : (typeof setCookieHeader === 'string' ? setCookieHeader : String(setCookieHeader));
       
+      // Also check response headers directly
+      const allHeaders = res.getHeaders();
+      const setCookieFromHeaders = allHeaders['set-cookie'];
+      
+      console.log('[OAuth] ===== COOKIE SETTING DEBUG =====');
+      console.log('[OAuth] Request details:', {
+        protocol: req.protocol,
+        secure: req.secure,
+        hostname: req.hostname,
+        headers: {
+          'x-forwarded-proto': req.get('x-forwarded-proto'),
+          'x-forwarded-host': req.get('x-forwarded-host'),
+          host: req.get('host'),
+        },
+      });
+      console.log('[OAuth] Cookie options:', cookieOptions);
+      console.log('[OAuth] Set-Cookie header (from getHeader):', setCookieHeader);
+      console.log('[OAuth] Set-Cookie header (from getHeaders):', setCookieFromHeaders);
+      console.log('[OAuth] All response headers:', Object.keys(allHeaders));
+      
       if (!cookieHeaderValue || (typeof cookieHeaderValue === 'string' && !cookieHeaderValue.includes('auth_token'))) {
-        console.error('[OAuth] ERROR: Cookie was not set! Set-Cookie header:', setCookieHeader);
+        console.error('[OAuth] ⚠️⚠️⚠️ ERROR: Cookie was not set! ⚠️⚠️⚠️');
+        console.error('[OAuth] Set-Cookie header value:', cookieHeaderValue);
+        console.error('[OAuth] Set-Cookie header type:', typeof setCookieHeader);
+        console.error('[OAuth] Set-Cookie header raw:', setCookieHeader);
+      } else {
+        console.log('[OAuth] ✅ Cookie header confirmed:', cookieHeaderValue.substring(0, 100) + '...');
       }
       
       console.log('[OAuth] Cookie set successfully:', {
@@ -163,7 +188,9 @@ router.get(
         redirectUrl,
         clientUrl: cleanClientUrl,
         isProduction,
+        isHTTPS,
       });
+      console.log('[OAuth] ===== END COOKIE DEBUG =====');
       
       console.log('[OAuth] Redirecting to:', redirectUrl);
       
@@ -191,6 +218,42 @@ const setCORSHeaders = (req: Request, res: Response): void => {
   }
 };
 
+// Test endpoint to check cookie setting
+router.get('/test-cookie', (req: Request, res: Response) => {
+  setCORSHeaders(req, res);
+  
+  const testToken = 'test-token-123';
+  const isHTTPS = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https';
+  const isProduction = process.env.NODE_ENV === 'production';
+  
+  const cookieOptions: any = {
+    httpOnly: true,
+    secure: isHTTPS || isProduction,
+    sameSite: 'none' as 'none',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    path: '/',
+  };
+  
+  res.cookie('test_cookie', testToken, cookieOptions);
+  
+  const setCookieHeader = res.getHeader('Set-Cookie');
+  
+  res.json({
+    success: true,
+    message: 'Test cookie set',
+    requestInfo: {
+      protocol: req.protocol,
+      secure: req.secure,
+      hostname: req.hostname,
+      forwardedProto: req.get('x-forwarded-proto'),
+      forwardedHost: req.get('x-forwarded-host'),
+    },
+    cookieOptions,
+    setCookieHeader: setCookieHeader,
+    receivedCookies: req.cookies || {},
+  });
+});
+
 // Get current user
 router.get('/me', (req: Request, res: Response) => {
   // Set CORS headers FIRST, before any processing
@@ -210,13 +273,21 @@ router.get('/me', (req: Request, res: Response) => {
     const referer = req.headers.referer;
     const origin = req.headers.origin;
     
+    console.log('[Auth] /me - ===== REQUEST DEBUG =====');
     console.log('[Auth] /me - Request details:', {
       hasCookies: !!req.cookies,
       cookieKeys: Object.keys(allCookies),
+      cookieValues: allCookies,
       hasAuthHeader: !!authHeader,
       origin,
       referer,
+      protocol: req.protocol,
+      secure: req.secure,
+      hostname: req.hostname,
+      forwardedProto: req.get('x-forwarded-proto'),
+      allHeaders: Object.keys(req.headers),
     });
+    console.log('[Auth] /me - ===== END REQUEST DEBUG =====');
     
     // Safely extract token
     let token: string | undefined;

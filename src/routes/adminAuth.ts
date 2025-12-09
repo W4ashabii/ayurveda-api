@@ -76,9 +76,11 @@ router.get(
       }
       
       // Determine redirect URL based on user role
+      // Remove any trailing slashes from clientUrl to avoid double slashes
+      const cleanClientUrl = clientUrl.replace(/\/+$/, '');
       const redirectUrl = isAdmin 
-        ? `${clientUrl}/admin/dashboard`
-        : `${clientUrl}/`;
+        ? `${cleanClientUrl}/admin/dashboard`
+        : `${cleanClientUrl}/`;
       
       // Set cookie and redirect
       // For cross-origin cookies in production, use sameSite: 'none' and secure: true
@@ -101,12 +103,19 @@ router.get(
       
       // Set additional CORS headers to ensure cookie is accepted
       res.setHeader('Access-Control-Allow-Credentials', 'true');
-      res.setHeader('Access-Control-Allow-Origin', clientUrl);
+      res.setHeader('Access-Control-Allow-Origin', cleanClientUrl);
       
+      // Set cookie BEFORE redirect
       res.cookie('auth_token', token, cookieOptions);
       
-      // Log cookie details including Set-Cookie header
+      // Verify cookie was set
       const setCookieHeader = res.getHeader('Set-Cookie');
+      const cookieHeaderValue = Array.isArray(setCookieHeader) ? setCookieHeader[0] : setCookieHeader;
+      
+      if (!cookieHeaderValue || !cookieHeaderValue.includes('auth_token')) {
+        console.error('[OAuth] ERROR: Cookie was not set! Set-Cookie header:', setCookieHeader);
+      }
+      
       console.log('[OAuth] Cookie set successfully:', {
         email: user.email,
         role: userRole,
@@ -119,14 +128,17 @@ router.get(
           path: cookieOptions.path,
           domain: cookieOptions.domain || 'not set (cross-origin)',
         },
-        setCookieHeader: Array.isArray(setCookieHeader) ? setCookieHeader[0] : setCookieHeader,
+        setCookieHeader: cookieHeaderValue,
+        setCookieHeaderLength: cookieHeaderValue ? cookieHeaderValue.length : 0,
         redirectUrl,
-        clientUrl: clientUrl,
+        clientUrl: cleanClientUrl,
+        isProduction,
       });
       
       console.log('[OAuth] Redirecting to:', redirectUrl);
       
-      res.redirect(redirectUrl);
+      // Use 302 redirect (temporary) to ensure cookie is sent
+      res.redirect(302, redirectUrl);
     } catch (error) {
       console.error('Auth callback error:', error);
       res.redirect(`${process.env.CLIENT_URL}/login?error=server_error`);

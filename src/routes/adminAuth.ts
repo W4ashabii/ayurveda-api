@@ -45,10 +45,12 @@ router.get(
       });
 
       // Set cookie and redirect
+      // For cross-origin cookies in production, use sameSite: 'none' and secure: true
+      const isProduction = process.env.NODE_ENV === 'production';
       res.cookie('auth_token', token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
+        secure: isProduction, // Must be true for sameSite: 'none'
+        sameSite: isProduction ? 'none' : 'lax', // 'none' for cross-origin, 'lax' for same-origin
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       });
 
@@ -56,6 +58,14 @@ router.get(
       const redirectUrl = isAdmin 
         ? `${process.env.CLIENT_URL}/admin/dashboard`
         : `${process.env.CLIENT_URL}/`;
+      
+      console.log('[OAuth] Successful login:', {
+        email: user.email,
+        role: userRole,
+        redirectUrl,
+        clientUrl: process.env.CLIENT_URL,
+      });
+      
       res.redirect(redirectUrl);
     } catch (error) {
       console.error('Auth callback error:', error);

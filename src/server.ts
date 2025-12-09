@@ -23,11 +23,41 @@ const app: Application = express();
 // Trust proxy
 app.set('trust proxy', 1);
 
-// CORS
+// CORS - Support multiple origins (comma-separated) or single origin
+const allowedOrigins = process.env.CLIENT_URL 
+  ? process.env.CLIENT_URL.split(',').map(url => url.trim())
+  : ['http://localhost:5173'];
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL,
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like OAuth redirects, mobile apps, curl requests)
+      if (!origin) {
+        console.log('[CORS] Allowing request with no origin');
+        return callback(null, true);
+      }
+      
+      // Check if origin is in allowed list
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        console.log(`[CORS] Allowing origin: ${origin}`);
+        callback(null, true);
+      } else {
+        // In production, be more permissive for OAuth redirects
+        // Allow if it's a redirect from Google OAuth or same domain
+        if (process.env.NODE_ENV === 'production') {
+          // Allow Google OAuth redirects
+          if (origin.includes('accounts.google.com') || origin.includes('googleusercontent.com')) {
+            console.log(`[CORS] Allowing Google OAuth origin: ${origin}`);
+            return callback(null, true);
+          }
+        }
+        console.warn(`[CORS] Blocked origin: ${origin}. Allowed origins: ${allowedOrigins.join(', ')}`);
+        callback(new Error(`Not allowed by CORS. Origin: ${origin}`));
+      }
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   })
 );
 
@@ -37,14 +67,16 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 // Session
+const isProduction = process.env.NODE_ENV === 'production';
 app.use(
   session({
     secret: process.env.SESSION_SECRET || 'dev-secret',
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: process.env.NODE_ENV === 'production',
+      secure: isProduction, // Must be true for sameSite: 'none'
       httpOnly: true,
+      sameSite: isProduction ? 'none' : 'lax', // 'none' for cross-origin in production
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     },
   })

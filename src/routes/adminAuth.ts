@@ -110,9 +110,11 @@ router.get(
       
       // Verify cookie was set
       const setCookieHeader = res.getHeader('Set-Cookie');
-      const cookieHeaderValue = Array.isArray(setCookieHeader) ? setCookieHeader[0] : setCookieHeader;
+      const cookieHeaderValue = Array.isArray(setCookieHeader) 
+        ? setCookieHeader[0] 
+        : (typeof setCookieHeader === 'string' ? setCookieHeader : String(setCookieHeader));
       
-      if (!cookieHeaderValue || !cookieHeaderValue.includes('auth_token')) {
+      if (!cookieHeaderValue || (typeof cookieHeaderValue === 'string' && !cookieHeaderValue.includes('auth_token'))) {
         console.error('[OAuth] ERROR: Cookie was not set! Set-Cookie header:', setCookieHeader);
       }
       
@@ -129,7 +131,7 @@ router.get(
           domain: cookieOptions.domain || 'not set (cross-origin)',
         },
         setCookieHeader: cookieHeaderValue,
-        setCookieHeaderLength: cookieHeaderValue ? cookieHeaderValue.length : 0,
+        setCookieHeaderLength: typeof cookieHeaderValue === 'string' ? cookieHeaderValue.length : 0,
         redirectUrl,
         clientUrl: cleanClientUrl,
         isProduction,

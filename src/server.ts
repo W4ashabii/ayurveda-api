@@ -28,21 +28,31 @@ let allowedOrigins = process.env.CLIENT_URL
   ? process.env.CLIENT_URL.split(',').map(url => url.trim()).filter(url => url.length > 0)
   : ['http://localhost:5173'];
 
-// Auto-fix http:// to https:// for Vercel/production domains
-if (process.env.NODE_ENV === 'production') {
-  allowedOrigins = allowedOrigins.map(origin => {
-    // If it's a Vercel domain or any production domain using http://, warn and suggest https://
-    if (origin.startsWith('http://') && (origin.includes('vercel.app') || origin.includes('.app') || origin.includes('.com'))) {
-      const httpsOrigin = origin.replace('http://', 'https://');
-      console.warn(`[CORS] WARNING: ${origin} should use https:// in production. Using ${httpsOrigin} instead.`);
-      return httpsOrigin;
-    }
-    return origin;
-  });
-}
+// Normalize origins: remove trailing slashes and fix protocols
+allowedOrigins = allowedOrigins.map(origin => {
+  // Remove trailing slash
+  let normalized = origin.replace(/\/+$/, '');
+  
+  // If it's a Vercel domain using http://, always convert to https://
+  if (normalized.startsWith('http://') && normalized.includes('vercel.app')) {
+    normalized = normalized.replace('http://', 'https://');
+    console.warn(`[CORS] Auto-fixing Vercel domain: ${origin} → ${normalized}`);
+  }
+  // For other production domains, fix if in production mode
+  else if (process.env.NODE_ENV === 'production' && normalized.startsWith('http://') && (normalized.includes('.app') || normalized.includes('.com'))) {
+    normalized = normalized.replace('http://', 'https://');
+    console.warn(`[CORS] WARNING: ${origin} should use https:// in production. Using ${normalized} instead.`);
+  }
+  
+  return normalized;
+});
 
 // Log CORS configuration on startup
+console.log('[CORS] Original CLIENT_URL:', process.env.CLIENT_URL || 'not set');
 console.log('[CORS] Configured allowed origins:', allowedOrigins);
+if (process.env.CLIENT_URL && process.env.CLIENT_URL.startsWith('http://') && process.env.CLIENT_URL.includes('vercel.app')) {
+  console.warn(`[CORS] ⚠️  CLIENT_URL uses http:// but Vercel requires https://. Auto-fixed, but please update your Vercel environment variable!`);
+}
 if (process.env.CLIENT_URL && process.env.CLIENT_URL.length < 10) {
   console.error(`[CORS] WARNING: CLIENT_URL seems too short (${process.env.CLIENT_URL.length} chars): "${process.env.CLIENT_URL}"`);
 }
@@ -56,21 +66,24 @@ app.use(
         return callback(null, true);
       }
       
-      // Check if origin is in allowed list
-      if (allowedOrigins.indexOf(origin) !== -1) {
-        console.log(`[CORS] Allowing origin: ${origin}`);
+      // Normalize incoming origin: remove trailing slash
+      const normalizedOrigin = origin.replace(/\/+$/, '');
+      
+      // Check if origin is in allowed list (exact match or normalized match)
+      if (allowedOrigins.indexOf(normalizedOrigin) !== -1 || allowedOrigins.indexOf(origin) !== -1) {
+        console.log(`[CORS] Allowing origin: ${origin} (normalized: ${normalizedOrigin})`);
         callback(null, true);
       } else {
         // In production, be more permissive for OAuth redirects
         // Allow if it's a redirect from Google OAuth or same domain
         if (process.env.NODE_ENV === 'production') {
           // Allow Google OAuth redirects
-          if (origin.includes('accounts.google.com') || origin.includes('googleusercontent.com')) {
-            console.log(`[CORS] Allowing Google OAuth origin: ${origin}`);
+          if (normalizedOrigin.includes('accounts.google.com') || normalizedOrigin.includes('googleusercontent.com')) {
+            console.log(`[CORS] Allowing Google OAuth origin: ${normalizedOrigin}`);
             return callback(null, true);
           }
         }
-        console.warn(`[CORS] Blocked origin: ${origin}. Allowed origins: ${allowedOrigins.join(', ')}`);
+        console.warn(`[CORS] Blocked origin: ${origin} (normalized: ${normalizedOrigin}). Allowed origins: ${allowedOrigins.join(', ')}`);
         callback(new Error(`Not allowed by CORS. Origin: ${origin}`));
       }
     },

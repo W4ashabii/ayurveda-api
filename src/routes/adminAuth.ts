@@ -83,14 +83,25 @@ router.get(
       // Set cookie and redirect
       // For cross-origin cookies in production, use sameSite: 'none' and secure: true
       const isProduction = process.env.NODE_ENV === 'production';
+      
+      // Extract domain from backend URL for cookie domain setting (if needed)
+      // For Vercel, cookies should work without explicit domain, but we'll set it for cross-origin
+      const backendUrl = new URL(process.env.OAUTH_CALLBACK_URL || `http://localhost:3000/api/auth/google/callback`);
+      const backendDomain = backendUrl.hostname;
+      
       const cookieOptions: any = {
         httpOnly: true,
         secure: isProduction, // Must be true for sameSite: 'none'
         sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax', // 'none' for cross-origin, 'lax' for same-origin
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
         path: '/', // Ensure cookie is available across all routes
-        // DO NOT set domain - let browser handle it for cross-origin cookies
+        // For cross-origin cookies, don't set domain explicitly - browser handles it
+        // Setting domain explicitly can cause issues with cross-origin cookies
       };
+      
+      // Set additional CORS headers to ensure cookie is accepted
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Origin', clientUrl);
       
       res.cookie('auth_token', token, cookieOptions);
       
@@ -126,10 +137,23 @@ router.get(
 // Get current user
 router.get('/me', (req: Request, res: Response) => {
   try {
+    // Set CORS headers explicitly for cross-origin cookie support
+    const origin = req.headers.origin;
+    if (origin) {
+      const allowedOrigins = process.env.CLIENT_URL 
+        ? process.env.CLIENT_URL.split(',').map(url => url.trim().replace(/\/+$/, ''))
+        : ['http://localhost:5173'];
+      
+      const normalizedOrigin = origin.replace(/\/+$/, '');
+      if (allowedOrigins.includes(normalizedOrigin) || allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+      }
+    }
+    
     // Debug: Log all cookies and headers
     const allCookies = req.cookies || {};
     const authHeader = req.headers.authorization;
-    const origin = req.headers.origin;
     const referer = req.headers.referer;
     
     console.log('[Auth] /me - Request details:', {

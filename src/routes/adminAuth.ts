@@ -47,11 +47,26 @@ router.get(
       // Set cookie and redirect
       // For cross-origin cookies in production, use sameSite: 'none' and secure: true
       const isProduction = process.env.NODE_ENV === 'production';
-      res.cookie('auth_token', token, {
+      const cookieOptions = {
         httpOnly: true,
         secure: isProduction, // Must be true for sameSite: 'none'
-        sameSite: isProduction ? 'none' : 'lax', // 'none' for cross-origin, 'lax' for same-origin
+        sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax', // 'none' for cross-origin, 'lax' for same-origin
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        path: '/', // Ensure cookie is available across all routes
+      };
+      
+      res.cookie('auth_token', token, cookieOptions);
+      
+      console.log('[OAuth] Cookie set successfully:', {
+        email: user.email,
+        role: userRole,
+        cookieOptions: {
+          httpOnly: cookieOptions.httpOnly,
+          secure: cookieOptions.secure,
+          sameSite: cookieOptions.sameSite,
+          maxAge: cookieOptions.maxAge,
+          path: cookieOptions.path,
+        },
       });
 
       // Validate CLIENT_URL
@@ -104,6 +119,7 @@ router.get('/me', (req: Request, res: Response) => {
     const token = req.cookies?.auth_token || req.headers.authorization?.replace('Bearer ', '');
     
     if (!token) {
+      console.log('[Auth] /me - No token found in cookies or headers');
       return res.json({
         authenticated: false,
       });
@@ -111,12 +127,20 @@ router.get('/me', (req: Request, res: Response) => {
 
     const user = verifyJwt(token);
     if (!user) {
+      console.log('[Auth] /me - Invalid token');
       return res.json({
         authenticated: false,
       });
     }
+    
     const adminEmails = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim()).filter(Boolean);
     const isAdmin = adminEmails.length > 0 && adminEmails.includes(user.email);
+
+    console.log('[Auth] /me - User authenticated:', {
+      email: user.email,
+      isAdmin,
+      tokenSource: req.cookies?.auth_token ? 'cookie' : 'header',
+    });
 
     // Return authenticated: true for any logged-in user (admin or regular user)
     res.json({
@@ -125,6 +149,7 @@ router.get('/me', (req: Request, res: Response) => {
       user,
     });
   } catch (error) {
+    console.error('[Auth] /me - Error:', error);
     res.json({
       authenticated: false,
     });
@@ -133,7 +158,16 @@ router.get('/me', (req: Request, res: Response) => {
 
 // Logout
 router.post('/logout', (req: Request, res: Response) => {
-  res.clearCookie('auth_token');
+  const isProduction = process.env.NODE_ENV === 'production';
+  // Clear cookie with same options used when setting it
+  res.clearCookie('auth_token', {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax',
+    path: '/',
+  });
+  
+  console.log('[Auth] Cookie cleared - user logged out');
   const { response, statusCode } = createSuccessResponse(null, 'Logged out successfully');
   res.status(statusCode).json(response);
 });

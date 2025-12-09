@@ -47,16 +47,19 @@ router.get(
       // Set cookie and redirect
       // For cross-origin cookies in production, use sameSite: 'none' and secure: true
       const isProduction = process.env.NODE_ENV === 'production';
-      const cookieOptions = {
+      const cookieOptions: any = {
         httpOnly: true,
         secure: isProduction, // Must be true for sameSite: 'none'
         sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax', // 'none' for cross-origin, 'lax' for same-origin
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
         path: '/', // Ensure cookie is available across all routes
+        // DO NOT set domain - let browser handle it for cross-origin cookies
       };
       
       res.cookie('auth_token', token, cookieOptions);
       
+      // Log cookie details including Set-Cookie header
+      const setCookieHeader = res.getHeader('Set-Cookie');
       console.log('[OAuth] Cookie set successfully:', {
         email: user.email,
         role: userRole,
@@ -66,7 +69,12 @@ router.get(
           sameSite: cookieOptions.sameSite,
           maxAge: cookieOptions.maxAge,
           path: cookieOptions.path,
+          domain: cookieOptions.domain || 'not set (cross-origin)',
         },
+        setCookieHeader: Array.isArray(setCookieHeader) ? setCookieHeader[0] : setCookieHeader,
+        redirectUrl: isAdmin 
+          ? `${clientUrl}/admin/dashboard`
+          : `${clientUrl}/`,
       });
 
       // Validate CLIENT_URL
@@ -116,10 +124,24 @@ router.get(
 // Get current user
 router.get('/me', (req: Request, res: Response) => {
   try {
+    // Debug: Log all cookies and headers
+    const allCookies = req.cookies || {};
+    const authHeader = req.headers.authorization;
+    const origin = req.headers.origin;
+    const referer = req.headers.referer;
+    
+    console.log('[Auth] /me - Request details:', {
+      hasCookies: !!req.cookies,
+      cookieKeys: Object.keys(allCookies),
+      hasAuthHeader: !!authHeader,
+      origin,
+      referer,
+    });
+    
     const token = req.cookies?.auth_token || req.headers.authorization?.replace('Bearer ', '');
     
     if (!token) {
-      console.log('[Auth] /me - No token found in cookies or headers');
+      console.log('[Auth] /me - No token found. Cookies:', allCookies, 'Auth header:', authHeader ? 'present' : 'missing');
       return res.json({
         authenticated: false,
       });
@@ -127,7 +149,7 @@ router.get('/me', (req: Request, res: Response) => {
 
     const user = verifyJwt(token);
     if (!user) {
-      console.log('[Auth] /me - Invalid token');
+      console.log('[Auth] /me - Invalid token (token exists but verification failed)');
       return res.json({
         authenticated: false,
       });

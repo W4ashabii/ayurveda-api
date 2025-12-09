@@ -24,9 +24,28 @@ const app: Application = express();
 app.set('trust proxy', 1);
 
 // CORS - Support multiple origins (comma-separated) or single origin
-const allowedOrigins = process.env.CLIENT_URL 
-  ? process.env.CLIENT_URL.split(',').map(url => url.trim())
+let allowedOrigins = process.env.CLIENT_URL 
+  ? process.env.CLIENT_URL.split(',').map(url => url.trim()).filter(url => url.length > 0)
   : ['http://localhost:5173'];
+
+// Auto-fix http:// to https:// for Vercel/production domains
+if (process.env.NODE_ENV === 'production') {
+  allowedOrigins = allowedOrigins.map(origin => {
+    // If it's a Vercel domain or any production domain using http://, warn and suggest https://
+    if (origin.startsWith('http://') && (origin.includes('vercel.app') || origin.includes('.app') || origin.includes('.com'))) {
+      const httpsOrigin = origin.replace('http://', 'https://');
+      console.warn(`[CORS] WARNING: ${origin} should use https:// in production. Using ${httpsOrigin} instead.`);
+      return httpsOrigin;
+    }
+    return origin;
+  });
+}
+
+// Log CORS configuration on startup
+console.log('[CORS] Configured allowed origins:', allowedOrigins);
+if (process.env.CLIENT_URL && process.env.CLIENT_URL.length < 10) {
+  console.error(`[CORS] WARNING: CLIENT_URL seems too short (${process.env.CLIENT_URL.length} chars): "${process.env.CLIENT_URL}"`);
+}
 
 app.use(
   cors({

@@ -54,16 +54,40 @@ router.get(
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       });
 
+      // Validate CLIENT_URL
+      if (!process.env.CLIENT_URL) {
+        console.error('[OAuth] ERROR: CLIENT_URL environment variable is not set!');
+        return res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/login?error=server_error`);
+      }
+      
+      // Ensure CLIENT_URL is a complete URL
+      let clientUrl = process.env.CLIENT_URL.trim();
+      if (!clientUrl.startsWith('http://') && !clientUrl.startsWith('https://')) {
+        console.error(`[OAuth] ERROR: CLIENT_URL must start with http:// or https://. Current value: ${clientUrl}`);
+        return res.redirect(`${clientUrl}/login?error=server_error`);
+      }
+      
+      // Auto-fix http:// to https:// for production/Vercel domains
+      if (process.env.NODE_ENV === 'production' && clientUrl.startsWith('http://')) {
+        // Check if it's a production domain (Vercel, etc.)
+        if (clientUrl.includes('vercel.app') || clientUrl.includes('.app') || clientUrl.includes('.com')) {
+          const httpsUrl = clientUrl.replace('http://', 'https://');
+          console.warn(`[OAuth] WARNING: CLIENT_URL uses http:// but should use https:// in production. Auto-fixing: ${clientUrl} → ${httpsUrl}`);
+          clientUrl = httpsUrl;
+        }
+      }
+      
       // Redirect admins to dashboard, normal users to homepage
       const redirectUrl = isAdmin 
-        ? `${process.env.CLIENT_URL}/admin/dashboard`
-        : `${process.env.CLIENT_URL}/`;
+        ? `${clientUrl}/admin/dashboard`
+        : `${clientUrl}/`;
       
       console.log('[OAuth] Successful login:', {
         email: user.email,
         role: userRole,
         redirectUrl,
-        clientUrl: process.env.CLIENT_URL,
+        clientUrl: clientUrl,
+        clientUrlLength: clientUrl.length,
       });
       
       res.redirect(redirectUrl);

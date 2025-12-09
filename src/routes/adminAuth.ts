@@ -285,25 +285,56 @@ router.get('/me', (req: Request, res: Response) => {
       secure: req.secure,
       hostname: req.hostname,
       forwardedProto: req.get('x-forwarded-proto'),
+      cookieHeader: req.headers.cookie,
       allHeaders: Object.keys(req.headers),
+      rawCookies: req.cookies,
     });
     console.log('[Auth] /me - ===== END REQUEST DEBUG =====');
     
-    // Safely extract token
+    // Safely extract token from multiple sources
     let token: string | undefined;
     try {
-      token = allCookies?.auth_token || req.headers.authorization?.replace('Bearer ', '');
+      // Try cookie first
+      token = allCookies?.auth_token;
+      if (!token) {
+        // Try authorization header
+        token = req.headers.authorization?.replace('Bearer ', '') || req.headers.authorization;
+      }
+      if (!token) {
+        // Try raw cookie header
+        const cookieHeader = req.headers.cookie || '';
+        const match = cookieHeader.match(/auth_token=([^;]+)/);
+        if (match) {
+          token = match[1];
+          console.log('[Auth] /me - Found token in raw cookie header');
+        }
+      }
     } catch (tokenError) {
       console.error('[Auth] /me - Error extracting token:', tokenError);
       token = undefined;
     }
     
     if (!token) {
-      console.log('[Auth] /me - No token found. Cookies:', allCookies, 'Auth header:', authHeader ? 'present' : 'missing');
+      console.log('[Auth] /me - ⚠️ NO TOKEN FOUND');
+      console.log('[Auth] /me - Cookies object:', JSON.stringify(allCookies));
+      console.log('[Auth] /me - Cookie header:', req.headers.cookie);
+      console.log('[Auth] /me - Auth header:', authHeader);
+      console.log('[Auth] /me - All headers:', req.headers);
+      
+      // Return with debug info
       return res.json({
         authenticated: false,
+        debug: {
+          hasCookies: !!req.cookies,
+          cookieKeys: Object.keys(allCookies),
+          cookieHeader: req.headers.cookie || 'missing',
+          authHeader: authHeader || 'missing',
+          origin: origin || 'missing',
+        },
       });
     }
+    
+    console.log('[Auth] /me - ✅ Token found, length:', token.length);
 
     try {
       // Verify JWT with fallback handling

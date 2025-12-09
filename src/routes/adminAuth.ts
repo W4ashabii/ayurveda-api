@@ -27,6 +27,14 @@ router.get(
       // Determine user role: admin if email is in admin list, otherwise user
       const isAdmin = adminEmails.length > 0 && adminEmails.includes(user.email);
       const userRole = isAdmin ? 'admin' : 'user';
+      
+      console.log('[OAuth] User authentication details:', {
+        email: user.email,
+        adminEmails: adminEmails,
+        isAdmin,
+        userRole,
+        adminEmailsLength: adminEmails.length,
+      });
 
       // Save or update user in database
       await Admin.findOneAndUpdate(
@@ -44,40 +52,7 @@ router.get(
         role: userRole,
       });
 
-      // Set cookie and redirect
-      // For cross-origin cookies in production, use sameSite: 'none' and secure: true
-      const isProduction = process.env.NODE_ENV === 'production';
-      const cookieOptions: any = {
-        httpOnly: true,
-        secure: isProduction, // Must be true for sameSite: 'none'
-        sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax', // 'none' for cross-origin, 'lax' for same-origin
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-        path: '/', // Ensure cookie is available across all routes
-        // DO NOT set domain - let browser handle it for cross-origin cookies
-      };
-      
-      res.cookie('auth_token', token, cookieOptions);
-      
-      // Log cookie details including Set-Cookie header
-      const setCookieHeader = res.getHeader('Set-Cookie');
-      console.log('[OAuth] Cookie set successfully:', {
-        email: user.email,
-        role: userRole,
-        cookieOptions: {
-          httpOnly: cookieOptions.httpOnly,
-          secure: cookieOptions.secure,
-          sameSite: cookieOptions.sameSite,
-          maxAge: cookieOptions.maxAge,
-          path: cookieOptions.path,
-          domain: cookieOptions.domain || 'not set (cross-origin)',
-        },
-        setCookieHeader: Array.isArray(setCookieHeader) ? setCookieHeader[0] : setCookieHeader,
-        redirectUrl: isAdmin 
-          ? `${clientUrl}/admin/dashboard`
-          : `${clientUrl}/`,
-      });
-
-      // Validate CLIENT_URL
+      // Validate and prepare CLIENT_URL first (before using it)
       if (!process.env.CLIENT_URL) {
         console.error('[OAuth] ERROR: CLIENT_URL environment variable is not set!');
         return res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/login?error=server_error`);
@@ -100,18 +75,45 @@ router.get(
         }
       }
       
-      // Redirect admins to dashboard, normal users to homepage
+      // Determine redirect URL based on user role
       const redirectUrl = isAdmin 
         ? `${clientUrl}/admin/dashboard`
         : `${clientUrl}/`;
       
-      console.log('[OAuth] Successful login:', {
+      // Set cookie and redirect
+      // For cross-origin cookies in production, use sameSite: 'none' and secure: true
+      const isProduction = process.env.NODE_ENV === 'production';
+      const cookieOptions: any = {
+        httpOnly: true,
+        secure: isProduction, // Must be true for sameSite: 'none'
+        sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax', // 'none' for cross-origin, 'lax' for same-origin
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        path: '/', // Ensure cookie is available across all routes
+        // DO NOT set domain - let browser handle it for cross-origin cookies
+      };
+      
+      res.cookie('auth_token', token, cookieOptions);
+      
+      // Log cookie details including Set-Cookie header
+      const setCookieHeader = res.getHeader('Set-Cookie');
+      console.log('[OAuth] Cookie set successfully:', {
         email: user.email,
         role: userRole,
+        isAdmin,
+        cookieOptions: {
+          httpOnly: cookieOptions.httpOnly,
+          secure: cookieOptions.secure,
+          sameSite: cookieOptions.sameSite,
+          maxAge: cookieOptions.maxAge,
+          path: cookieOptions.path,
+          domain: cookieOptions.domain || 'not set (cross-origin)',
+        },
+        setCookieHeader: Array.isArray(setCookieHeader) ? setCookieHeader[0] : setCookieHeader,
         redirectUrl,
         clientUrl: clientUrl,
-        clientUrlLength: clientUrl.length,
       });
+      
+      console.log('[OAuth] Redirecting to:', redirectUrl);
       
       res.redirect(redirectUrl);
     } catch (error) {

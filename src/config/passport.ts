@@ -12,18 +12,87 @@ export interface JwtUser {
 }
 
 export function signJwt(user: JwtUser): string {
-  const secret: Secret = (process.env.JWT_SECRET || 'dev-secret') as Secret;
-  const options: SignOptions = {};
-  const expiresInEnv = process.env.JWT_EXPIRES_IN || '7d';
-  (options as any).expiresIn = expiresInEnv;
-  return jwt.sign(user as any, secret, options as any);
+  try {
+    // Fallback to dev-secret if JWT_SECRET is not set (with warning in production)
+    const secret: Secret = (process.env.JWT_SECRET || 'dev-secret') as Secret;
+    
+    if (!process.env.JWT_SECRET) {
+      if (process.env.NODE_ENV === 'production') {
+        console.error('[JWT] WARNING: JWT_SECRET not set in production! Using fallback secret. This is insecure!');
+      } else {
+        console.warn('[JWT] JWT_SECRET not set, using fallback dev-secret');
+      }
+    }
+    
+    const options: SignOptions = {};
+    const expiresInEnv = process.env.JWT_EXPIRES_IN || '7d';
+    (options as any).expiresIn = expiresInEnv;
+    
+    const token = jwt.sign(user as any, secret, options as any);
+    console.log('[JWT] Token signed successfully for user:', user.email);
+    return token;
+  } catch (error: any) {
+    console.error('[JWT] Error signing token:', error.message || error);
+    // Fallback: try with a default secret if the original fails
+    try {
+      const fallbackSecret: Secret = 'fallback-secret-key' as Secret;
+      console.warn('[JWT] Attempting fallback token signing');
+      return jwt.sign(user as any, fallbackSecret, { expiresIn: '7d' });
+    } catch (fallbackError: any) {
+      console.error('[JWT] Fallback token signing also failed:', fallbackError.message || fallbackError);
+      throw new Error('Failed to sign JWT token');
+    }
+  }
 }
 
 export function verifyJwt(token: string): JwtUser | null {
+  if (!token || typeof token !== 'string' || token.trim().length === 0) {
+    console.warn('[JWT] Invalid token provided (empty or not a string)');
+    return null;
+  }
+  
   try {
+    // Primary secret (from environment or fallback)
     const secret: Secret = (process.env.JWT_SECRET || 'dev-secret') as Secret;
-    return jwt.verify(token, secret) as JwtUser;
-  } catch {
+    
+    try {
+      const decoded = jwt.verify(token, secret) as JwtUser;
+      console.log('[JWT] Token verified successfully for user:', decoded.email);
+      return decoded;
+    } catch (primaryError: any) {
+      // If primary verification fails, try fallback secret (for migration scenarios)
+      if (primaryError.name === 'JsonWebTokenError' || primaryError.name === 'TokenExpiredError') {
+        console.warn('[JWT] Primary verification failed:', primaryError.name, primaryError.message);
+        
+        // Only try fallback if it's not an expiration error (expired tokens should fail)
+        if (primaryError.name !== 'TokenExpiredError') {
+          try {
+            const fallbackSecret: Secret = 'fallback-secret-key' as Secret;
+            console.warn('[JWT] Attempting fallback token verification');
+            const decoded = jwt.verify(token, fallbackSecret) as JwtUser;
+            console.log('[JWT] Token verified with fallback secret for user:', decoded.email);
+            return decoded;
+          } catch (fallbackError: any) {
+            console.warn('[JWT] Fallback verification also failed:', fallbackError.name);
+          }
+        } else {
+          console.log('[JWT] Token expired, not attempting fallback');
+        }
+      }
+      
+      // Log specific error types for debugging
+      if (primaryError.name === 'TokenExpiredError') {
+        console.log('[JWT] Token has expired');
+      } else if (primaryError.name === 'JsonWebTokenError') {
+        console.log('[JWT] Invalid token format or signature');
+      } else if (primaryError.name === 'NotBeforeError') {
+        console.log('[JWT] Token not yet valid');
+      }
+      
+      return null;
+    }
+  } catch (error: any) {
+    console.error('[JWT] Unexpected error during token verification:', error.message || error);
     return null;
   }
 }

@@ -43,14 +43,25 @@ router.get(
         { upsert: true, new: true }
       );
 
-      // Generate JWT
-      const token = signJwt({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        picture: user.picture,
-        role: userRole,
-      });
+      // Generate JWT with error handling
+      let token: string;
+      try {
+        token = signJwt({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          picture: user.picture,
+          role: userRole,
+        });
+      } catch (jwtError: any) {
+        console.error('[OAuth] Failed to generate JWT token:', jwtError.message || jwtError);
+        return res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/login?error=server_error`);
+      }
+      
+      if (!token) {
+        console.error('[OAuth] JWT token generation returned empty token');
+        return res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/login?error=server_error`);
+      }
 
       // Validate and prepare CLIENT_URL first (before using it)
       if (!process.env.CLIENT_URL) {
@@ -148,27 +159,40 @@ router.get(
   }
 );
 
+// Helper function to set CORS headers
+const setCORSHeaders = (req: Request, res: Response): void => {
+  const origin = req.headers.origin;
+  if (origin) {
+    const allowedOrigins = process.env.CLIENT_URL 
+      ? process.env.CLIENT_URL.split(',').map(url => url.trim().replace(/\/+$/, ''))
+      : ['http://localhost:5173'];
+    
+    const normalizedOrigin = origin.replace(/\/+$/, '');
+    if (allowedOrigins.includes(normalizedOrigin) || allowedOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+  }
+};
+
 // Get current user
 router.get('/me', (req: Request, res: Response) => {
+  // Set CORS headers FIRST, before any processing
+  setCORSHeaders(req, res);
+  
   try {
-    // Set CORS headers explicitly for cross-origin cookie support
-    const origin = req.headers.origin;
-    if (origin) {
-      const allowedOrigins = process.env.CLIENT_URL 
-        ? process.env.CLIENT_URL.split(',').map(url => url.trim().replace(/\/+$/, ''))
-        : ['http://localhost:5173'];
-      
-      const normalizedOrigin = origin.replace(/\/+$/, '');
-      if (allowedOrigins.includes(normalizedOrigin) || allowedOrigins.includes(origin)) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-      }
+    // Safely get cookies (handle case where cookieParser might not have run)
+    let allCookies: any = {};
+    try {
+      allCookies = req.cookies || {};
+    } catch (cookieError) {
+      console.warn('[Auth] /me - Error reading cookies:', cookieError);
+      allCookies = {};
     }
     
-    // Debug: Log all cookies and headers
-    const allCookies = req.cookies || {};
     const authHeader = req.headers.authorization;
     const referer = req.headers.referer;
+    const origin = req.headers.origin;
     
     console.log('[Auth] /me - Request details:', {
       hasCookies: !!req.cookies,
@@ -178,7 +202,14 @@ router.get('/me', (req: Request, res: Response) => {
       referer,
     });
     
-    const token = req.cookies?.auth_token || req.headers.authorization?.replace('Bearer ', '');
+    // Safely extract token
+    let token: string | undefined;
+    try {
+      token = allCookies?.auth_token || req.headers.authorization?.replace('Bearer ', '');
+    } catch (tokenError) {
+      console.error('[Auth] /me - Error extracting token:', tokenError);
+      token = undefined;
+    }
     
     if (!token) {
       console.log('[Auth] /me - No token found. Cookies:', allCookies, 'Auth header:', authHeader ? 'present' : 'missing');
@@ -187,32 +218,55 @@ router.get('/me', (req: Request, res: Response) => {
       });
     }
 
-    const user = verifyJwt(token);
-    if (!user) {
-      console.log('[Auth] /me - Invalid token (token exists but verification failed)');
+    try {
+      // Verify JWT with fallback handling
+      const user = verifyJwt(token);
+      
+      if (!user) {
+        console.log('[Auth] /me - Invalid token (token exists but verification failed)');
+        return res.json({
+          authenticated: false,
+        });
+      }
+      
+      // Validate user object has required fields
+      if (!user.email || !user.id) {
+        console.error('[Auth] /me - User object missing required fields:', user);
+        return res.json({
+          authenticated: false,
+        });
+      }
+      
+      const adminEmails = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim()).filter(Boolean);
+      const isAdmin = adminEmails.length > 0 && adminEmails.includes(user.email);
+
+      console.log('[Auth] /me - User authenticated:', {
+        email: user.email,
+        isAdmin,
+        tokenSource: req.cookies?.auth_token ? 'cookie' : 'header',
+      });
+
+      // Return authenticated: true for any logged-in user (admin or regular user)
+      return res.json({
+        authenticated: true,
+        isAdmin,
+        user,
+      });
+    } catch (jwtError: any) {
+      console.error('[Auth] /me - JWT verification error:', {
+        error: jwtError.message || jwtError,
+        name: jwtError.name,
+        stack: process.env.NODE_ENV === 'development' ? jwtError.stack : undefined,
+      });
       return res.json({
         authenticated: false,
       });
     }
-    
-    const adminEmails = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim()).filter(Boolean);
-    const isAdmin = adminEmails.length > 0 && adminEmails.includes(user.email);
-
-    console.log('[Auth] /me - User authenticated:', {
-      email: user.email,
-      isAdmin,
-      tokenSource: req.cookies?.auth_token ? 'cookie' : 'header',
-    });
-
-    // Return authenticated: true for any logged-in user (admin or regular user)
-    res.json({
-      authenticated: true,
-      isAdmin,
-      user,
-    });
   } catch (error) {
-    console.error('[Auth] /me - Error:', error);
-    res.json({
+    console.error('[Auth] /me - Unexpected error:', error);
+    // Ensure CORS headers are still set even on error
+    setCORSHeaders(req, res);
+    return res.json({
       authenticated: false,
     });
   }

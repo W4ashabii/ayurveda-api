@@ -18,6 +18,20 @@ const errorHandler = (
 
   console.error('Error:', err);
 
+  // Set CORS headers even on error to prevent CORS errors
+  const origin = req.headers.origin;
+  if (origin) {
+    const allowedOrigins = process.env.CLIENT_URL 
+      ? process.env.CLIENT_URL.split(',').map(url => url.trim().replace(/\/+$/, ''))
+      : ['http://localhost:5173'];
+    
+    const normalizedOrigin = origin.replace(/\/+$/, '');
+    if (allowedOrigins.includes(normalizedOrigin) || allowedOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+  }
+
   // Bad ObjectId
   if (err.name === 'CastError') {
     const message = 'Resource not found';

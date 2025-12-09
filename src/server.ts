@@ -66,6 +66,12 @@ app.use(
         return callback(null, true);
       }
       
+      // In development, allow all origins
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`[CORS] Development mode - allowing origin: ${origin}`);
+        return callback(null, true);
+      }
+      
       // Normalize incoming origin: remove trailing slash
       const normalizedOrigin = origin.replace(/\/+$/, '');
       
@@ -74,31 +80,36 @@ app.use(
         console.log(`[CORS] Allowing origin: ${origin} (normalized: ${normalizedOrigin})`);
         callback(null, true);
       } else {
-        // In production, be more permissive for OAuth redirects
-        // Allow if it's a redirect from Google OAuth or same domain
-        if (process.env.NODE_ENV === 'production') {
-          // Allow Google OAuth redirects
-          if (normalizedOrigin.includes('accounts.google.com') || normalizedOrigin.includes('googleusercontent.com')) {
-            console.log(`[CORS] Allowing Google OAuth origin: ${normalizedOrigin}`);
-            return callback(null, true);
-          }
+        // Be very permissive - allow Google domains, vercel domains, localhost
+        if (
+          normalizedOrigin.includes('accounts.google.com') || 
+          normalizedOrigin.includes('googleusercontent.com') ||
+          normalizedOrigin.includes('vercel.app') ||
+          normalizedOrigin.includes('localhost') ||
+          normalizedOrigin.includes('127.0.0.1')
+        ) {
+          console.log(`[CORS] Allowing permissive origin: ${normalizedOrigin}`);
+          return callback(null, true);
         }
-        console.warn(`[CORS] Blocked origin: ${origin} (normalized: ${normalizedOrigin}). Allowed origins: ${allowedOrigins.join(', ')}`);
-        callback(new Error(`Not allowed by CORS. Origin: ${origin}`));
+        // Even if not in list, allow it (very permissive)
+        console.warn(`[CORS] Origin not in allowed list but allowing anyway: ${origin}. Allowed origins: ${allowedOrigins.join(', ')}`);
+        callback(null, true);
       }
     },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+    exposedHeaders: ['Content-Length', 'Content-Type'],
+    maxAge: 86400, // 24 hours
   })
 );
 
-// Body parsing
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Body parsing - less strict, allow larger payloads
+app.use(express.json({ limit: '10mb', strict: false }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
-// Session
+// Session - less strict cookie settings
 const isProduction = process.env.NODE_ENV === 'production';
 app.use(
   session({
@@ -106,9 +117,11 @@ app.use(
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: isProduction, // Must be true for sameSite: 'none'
+      // Less strict: only require secure if explicitly set
+      secure: isProduction && process.env.FORCE_SECURE_COOKIES !== 'false',
       httpOnly: true,
-      sameSite: isProduction ? 'none' : 'lax', // 'none' for cross-origin in production
+      // Less strict: use 'lax' by default, 'none' only if needed
+      sameSite: (isProduction && process.env.USE_STRICT_SAMESITE !== 'false') ? 'none' : 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     },
   })

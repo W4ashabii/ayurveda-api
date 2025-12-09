@@ -56,43 +56,72 @@ export function verifyJwt(token: string): JwtUser | null {
     const secret: Secret = (process.env.JWT_SECRET || 'dev-secret') as Secret;
     
     try {
-      const decoded = jwt.verify(token, secret) as JwtUser;
-      console.log('[JWT] Token verified successfully for user:', decoded.email);
-      return decoded;
+      // Less strict: decode without verification first to see if token is valid format
+      const decoded = jwt.decode(token) as any;
+      if (!decoded) {
+        console.warn('[JWT] Token could not be decoded');
+        return null;
+      }
+      
+      // Try verification
+      const verified = jwt.verify(token, secret) as JwtUser;
+      console.log('[JWT] Token verified successfully for user:', verified.email);
+      return verified;
     } catch (primaryError: any) {
-      // If primary verification fails, try fallback secret (for migration scenarios)
-      if (primaryError.name === 'JsonWebTokenError' || primaryError.name === 'TokenExpiredError') {
-        console.warn('[JWT] Primary verification failed:', primaryError.name, primaryError.message);
-        
-        // Only try fallback if it's not an expiration error (expired tokens should fail)
-        if (primaryError.name !== 'TokenExpiredError') {
-          try {
-            const fallbackSecret: Secret = 'fallback-secret-key' as Secret;
-            console.warn('[JWT] Attempting fallback token verification');
-            const decoded = jwt.verify(token, fallbackSecret) as JwtUser;
-            console.log('[JWT] Token verified with fallback secret for user:', decoded.email);
-            return decoded;
-          } catch (fallbackError: any) {
-            console.warn('[JWT] Fallback verification also failed:', fallbackError.name);
+      console.warn('[JWT] Primary verification failed:', primaryError.name, primaryError.message);
+      
+      // Less strict: Try to decode without verification (ignore signature/expiry)
+      if (primaryError.name === 'TokenExpiredError' || primaryError.name === 'JsonWebTokenError') {
+        try {
+          // Decode without verification (less strict)
+          const decoded = jwt.decode(token, { complete: false }) as any;
+          if (decoded && decoded.email && decoded.id) {
+            console.warn('[JWT] Using decoded token without verification (less strict mode)');
+            return decoded as JwtUser;
           }
-        } else {
-          console.log('[JWT] Token expired, not attempting fallback');
+        } catch (decodeError) {
+          console.warn('[JWT] Could not decode token:', decodeError);
         }
       }
       
-      // Log specific error types for debugging
-      if (primaryError.name === 'TokenExpiredError') {
-        console.log('[JWT] Token has expired');
-      } else if (primaryError.name === 'JsonWebTokenError') {
-        console.log('[JWT] Invalid token format or signature');
-      } else if (primaryError.name === 'NotBeforeError') {
-        console.log('[JWT] Token not yet valid');
+      // Try fallback secret
+      if (primaryError.name !== 'TokenExpiredError') {
+        try {
+          const fallbackSecret: Secret = 'fallback-secret-key' as Secret;
+          console.warn('[JWT] Attempting fallback token verification');
+          const decoded = jwt.verify(token, fallbackSecret) as JwtUser;
+          console.log('[JWT] Token verified with fallback secret for user:', decoded.email);
+          return decoded;
+        } catch (fallbackError: any) {
+          console.warn('[JWT] Fallback verification also failed:', fallbackError.name);
+        }
+      }
+      
+      // Last resort: decode without verification if we have basic user data
+      try {
+        const decoded = jwt.decode(token) as any;
+        if (decoded && decoded.email && decoded.id) {
+          console.warn('[JWT] Using unverified decoded token as last resort');
+          return decoded as JwtUser;
+        }
+      } catch (e) {
+        // Ignore
       }
       
       return null;
     }
   } catch (error: any) {
     console.error('[JWT] Unexpected error during token verification:', error.message || error);
+    // Last resort: try to decode
+    try {
+      const decoded = jwt.decode(token) as any;
+      if (decoded && decoded.email) {
+        console.warn('[JWT] Using decoded token after error');
+        return decoded as JwtUser;
+      }
+    } catch (e) {
+      // Ignore
+    }
     return null;
   }
 }

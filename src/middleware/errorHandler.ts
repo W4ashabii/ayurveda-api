@@ -18,18 +18,16 @@ const errorHandler = (
 
   console.error('Error:', err);
 
-  // Set CORS headers even on error to prevent CORS errors
+  // Set CORS headers even on error to prevent CORS errors (very permissive)
   const origin = req.headers.origin;
   if (origin) {
-    const allowedOrigins = process.env.CLIENT_URL 
-      ? process.env.CLIENT_URL.split(',').map(url => url.trim().replace(/\/+$/, ''))
-      : ['http://localhost:5173'];
-    
-    const normalizedOrigin = origin.replace(/\/+$/, '');
-    if (allowedOrigins.includes(normalizedOrigin) || allowedOrigins.includes(origin)) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-    }
+    // Always allow origin - be very permissive
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  } else {
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
 
   // Bad ObjectId

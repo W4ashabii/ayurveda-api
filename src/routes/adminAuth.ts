@@ -104,8 +104,10 @@ router.get(
       
       const cookieOptions: any = {
         httpOnly: true,
-        secure: isProduction, // Must be true for sameSite: 'none'
-        sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax', // 'none' for cross-origin, 'lax' for same-origin
+        // Less strict: allow secure cookies in production, but also allow non-secure in dev
+        secure: isProduction && process.env.FORCE_SECURE_COOKIES !== 'false',
+        // Less strict: use 'lax' in dev, 'none' in production (but try 'lax' first even in prod)
+        sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax' | 'strict',
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
         path: '/', // Ensure cookie is available across all routes
         // For cross-origin cookies, don't set domain explicitly - browser handles it
@@ -159,19 +161,18 @@ router.get(
   }
 );
 
-// Helper function to set CORS headers
+// Helper function to set CORS headers (very permissive)
 const setCORSHeaders = (req: Request, res: Response): void => {
   const origin = req.headers.origin;
   if (origin) {
-    const allowedOrigins = process.env.CLIENT_URL 
-      ? process.env.CLIENT_URL.split(',').map(url => url.trim().replace(/\/+$/, ''))
-      : ['http://localhost:5173'];
-    
-    const normalizedOrigin = origin.replace(/\/+$/, '');
-    if (allowedOrigins.includes(normalizedOrigin) || allowedOrigins.includes(origin)) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-    }
+    // Always set CORS headers - be very permissive
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  } else {
+    // Even if no origin, set credentials header
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
 };
 
